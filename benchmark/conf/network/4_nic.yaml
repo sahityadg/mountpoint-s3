@@ -1,0 +1,2 @@
+interface_names: [ens32, ens64, ens96, ens128]
+maximum_throughput_gbps: 400
