@@ -36,6 +36,8 @@ mountpoint_congestion_threshold: !!null
 # For monitoring network bandwidth
 with_bwm: false
 
+fio_io_engine: "psync"
+
 iterations: 1
 
 # Define defaults for these columns, but script will run as MULTIRUN by default
@@ -65,3 +67,4 @@ hydra:
       '+network': 1_nic, 2_nic, 4_nic
       with_bwm: true
       mountpoint_max_background: 16, 64, 128
+      fio_io_engine: "libaio"
