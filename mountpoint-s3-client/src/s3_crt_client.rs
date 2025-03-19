@@ -812,6 +812,21 @@ impl S3CrtClientInner {
         // Buffer pool metrics
         let start = Instant::now();
         let buffer_pool_stats = s3_client.poll_buffer_pool_usage_stats();
+
+        // FIXME: Add stats in one line to make parsing easier. 
+        debug!(
+            mem_limit = buffer_pool_stats.mem_limit,
+            primary_cutoff = buffer_pool_stats.primary_cutoff,
+            primary_used = buffer_pool_stats.primary_used,
+            primary_allocated = buffer_pool_stats.primary_allocated,
+            primary_reserved = buffer_pool_stats.primary_reserved,
+            primary_num_blocks = buffer_pool_stats.primary_num_blocks,
+            secondary_reserved = buffer_pool_stats.secondary_reserved,
+            secondary_used = buffer_pool_stats.secondary_used,
+            forced_used = buffer_pool_stats.forced_used,
+            "Buffer pool metrics update "
+        );
+
         metrics::histogram!("s3.client.buffer_pool.get_usage_latency_us").record(start.elapsed().as_micros() as f64);
         metrics::gauge!("s3.client.buffer_pool.mem_limit").set(buffer_pool_stats.mem_limit as f64);
         metrics::gauge!("s3.client.buffer_pool.primary_cutoff").set(buffer_pool_stats.primary_cutoff as f64);
