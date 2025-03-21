@@ -13,7 +13,7 @@ write_part_size: 16777216 # to allow for uploads of 100GiB
 metadata_ttl: "indefinite"
 
 fio_benchmarks:
-  - sequential_read
+  - sequential_read_long
 
 # Path to Mountpoint binary. Recommended to use an absolute path.
 mountpoint_binary: !!null
@@ -56,15 +56,14 @@ hydra:
   sweeper:
     params:
       # Maximum number of FUSE threads for Mountpoint. Passed as `--max-threads` argument.
-      fuse_threads: 16, 32, 64
+      fuse_threads: 16, 64
       # Number of processes that will be interacting with the file.
-      application_workers: 1, 16, 32, 64, 128
+      application_workers: 1, 16, 64, 128
       # Configure if application should use Direct IO, skipping the Linux page cache
       direct_io: false, true
       # Don't touch the params below, they are based on settings above.
       fio_benchmark: "${join:',', ${fio_benchmarks}}"
-      iteration: "range(5)"
+      iteration: "range(3)"
       '+network': 1_nic, 2_nic, 4_nic
       with_bwm: true
-      mountpoint_max_background: 16, 64, 128
-      fio_io_engine: "libaio"
+      mountpoint_max_background: 64
