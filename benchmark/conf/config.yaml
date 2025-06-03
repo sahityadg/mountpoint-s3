@@ -47,6 +47,8 @@ application_workers: 1
 direct_io: false
 fio_benchmark: "${fio_benchmarks[0]}"
 fio_io_engine: "psync"
+block_size: "256k"
+run_time: "30s"
 iteration: 0
 
 hydra:

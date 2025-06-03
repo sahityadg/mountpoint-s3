@@ -48,7 +48,6 @@ def _mounted_bucket(
         except Exception:
             log.error(f"Error cleaning up Mountpoint at {mount_dir}:", exc_info=True)
 
-
 class MountError(Exception):
     pass
 
@@ -178,6 +177,8 @@ def _run_fio(cfg: DictConfig, mount_dir: str) -> None:
     subprocess_env["DIRECT"] = "1" if cfg['direct_io'] else "0"
     subprocess_env["UNIQUE_DIR"] = datetime.now(tz=timezone.utc).isoformat()
     subprocess_env["IO_ENGINE"] = cfg['fio_io_engine']
+    subprocess_env["BLOCK_SIZE"] = str(cfg['block_size'])
+    subprocess_env["RUN_TIME"] = str(cfg['run_time'])
     log.info("Running FIO with args: %s; env: %s", subprocess_args, subprocess_env)
 
     # Use Popen instead of check_output, as we had some issues when trying to attach perf
