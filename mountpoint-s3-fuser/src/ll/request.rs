@@ -1988,10 +1988,11 @@ impl<'a> fmt::Display for Operation<'a> {
             Operation::Open(x) => write!(f, "OPEN flags {:#x}", x.flags()),
             Operation::Read(x) => write!(
                 f,
-                "READ fh {:?}, offset {}, size {}",
+                "READ fh {:?}, offset {}, size {} flags {}",
                 x.file_handle(),
                 x.offset(),
-                x.size()
+                x.size(),
+                x.flags()
             ),
             Operation::Write(x) => write!(
                 f,
