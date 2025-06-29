@@ -77,6 +77,8 @@ const fn default_init_flags(#[allow(unused_variables)] capabilities: u32) -> u32
     #[cfg(feature = "abi-7-28")]
     {
         let mut flags = INIT_FLAGS;
+        // Toggle Async read flag for testing
+        flags &= !FUSE_ASYNC_READ;
         if capabilities & FUSE_MAX_PAGES != 0 {
             flags |= FUSE_MAX_PAGES;
         }
