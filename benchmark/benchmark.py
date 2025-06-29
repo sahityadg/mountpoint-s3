@@ -351,7 +351,7 @@ class ResourceMonitoring:
 
     def _start_perf_stat(self) -> any:
         """Gather perf count statistics"""
-        perf_events = ["cycles", "instructions", "cache-references", "cache-misses", "bus-cycles"]
+        perf_events = ["cycles", "instructions", "cache-references", "cache-misses", "page-faults"]
 
         # fmt: off
         perf_args = [
