@@ -17,7 +17,7 @@ fio_benchmarks:
 
 # Path to Mountpoint binary. Recommended to use an absolute path.
 mountpoint_binary: !!null
-mountpoint_debug: false
+mountpoint_debug: true
 mountpoint_debug_crt: false
 
 # No configuration out of the box, use defaults.
@@ -36,10 +36,10 @@ mountpoint_congestion_threshold: !!null
 # For monitoring network bandwidth
 with_bwm: false
 # For gathering performance counter statistics
-with_perf_stat: false
+with_perf_stat: true
 
 # Works automatically ONLY where this script manages compilation. It has no effect if `mountpoint_binary` is set.
-stub_mode: "off" # fs_handler, s3_client
+stub_mode: "fs_handler" # fs_handler, s3_client
 
 iterations: 1
 
@@ -60,11 +60,13 @@ hydra:
   sweeper:
     params:
       # Maximum number of FUSE threads for Mountpoint. Passed as `--max-threads` argument.
-      'fuse_threads': 16, 32, 64, 128
+      'fuse_threads': 1, 16, 64
       # Number of processes that will be interacting with the file.
-      'application_workers': 1, 4, 8, 16, 32, 64, 128, 256
+      'application_workers': 1, 4, 16, 64
       # Configure if application should use Direct IO, skipping the Linux page cache
-      'direct_io': false, true
+      'direct_io': false
       # Don't touch the params below, they are based on settings above.
       'fio_benchmark': "${join:',', ${fio_benchmarks}}"
+      '+network': 1_nic_400
       'iteration': "range(${iterations})"
+      '+mountpoint_max_background': 16, 64, 128
