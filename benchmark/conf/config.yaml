@@ -39,9 +39,9 @@ with_bwm: false
 with_perf_stat: true
 
 # Works automatically ONLY where this script manages compilation. It has no effect if `mountpoint_binary` is set.
-stub_mode: "fs_handler" # fs_handler, s3_client
+stub_mode: "off" # fs_handler, s3_client
 
-iterations: 1
+iterations: 5 
 
 # Define defaults for these columns, but script will run as MULTIRUN by default
 fuse_threads: !!null
@@ -64,7 +64,7 @@ hydra:
       # Number of processes that will be interacting with the file.
       'application_workers': 1, 4, 16, 64
       # Configure if application should use Direct IO, skipping the Linux page cache
-      'direct_io': false
+      'direct_io': false, true
       # Don't touch the params below, they are based on settings above.
       'fio_benchmark': "${join:',', ${fio_benchmarks}}"
       '+network': 1_nic_400
