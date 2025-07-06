@@ -25,6 +25,7 @@ OmegaConf.register_new_resolver(
 
 MOUNT_DIRECTORY = "s3"
 MP_LOGS_DIRECTORY = "mp_logs/"
+DEFAULT_READ_SIZE = 262144
 
 
 @contextmanager
@@ -235,19 +236,18 @@ def _run_prefetch_benchmark(cfg: DictConfig, mount_dir: str) -> None:
     if part_size is not None:
         subprocess_args.extend(["--part-size", str(part_size)])
     
-    read_size = cfg.get("read_size")
-    if read_size is not None:
-        subprocess_args.extend(["--read-size", str(read_size)])
+    read_size = cfg.get("read_size", DEFAULT_READ_SIZE)
+    subprocess_args.extend(["--read-size", str(read_size)])
     
     iterations = cfg.get("iterations", 1)
     subprocess_args.extend(["--iterations", str(iterations)])
     
-    downloads_per_object = cfg.get('application_workers', 1)
-    subprocess_args.extend(["--downloads-per-object", str(downloads_per_object)])
-    
     if cfg['network']['interface_names']:
         for interface in cfg['network']['interface_names']:
             subprocess_args.extend(["--bind", interface])
+
+    if cfg['run_time'] is not None:
+        subprocess_args.extend("--max-runtime", cfg['run_time'])
     
     log.info("Running prefetch benchmark with args: %s", subprocess_args)
     
@@ -287,8 +287,8 @@ def _run_fio(cfg: DictConfig, mount_dir: str) -> None:
     subprocess_env["DIRECT"] = "1" if fio_cfg.get('direct_io', False) else "0"
     subprocess_env["UNIQUE_DIR"] = datetime.now(tz=timezone.utc).isoformat()
     subprocess_env["IO_ENGINE"] = fio_cfg.get('fio_io_engine', 'psync')
-    subprocess_env["BLOCK_SIZE"] = str(fio_cfg.get('block_size', cfg.get('read_size', 262144)))
-    subprocess_env["RUN_TIME"] = str(fio_cfg.get('run_time', 30))
+    subprocess_env["BLOCK_SIZE"] = str(cfg.get('read_size', DEFAULT_READ_SIZE))
+    subprocess_env["RUN_TIME"] = str(cfg('run_time', 30))
     log.info("Running FIO with args: %s; env: %s", subprocess_args, subprocess_env)
 
     with Popen(subprocess_args, env=subprocess_env) as process:

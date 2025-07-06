@@ -17,6 +17,7 @@ maximum_throughput_gbps: !!null
 crt_memory_limit_gib: !!null
 read_part_size: !!null
 write_part_size: 16777216 # to allow for uploads of 100GiB
+run_time: 30  # Default run time in seconds
 
 # Mount-s3 specific parameters (used when mounting S3 bucket for FIO benchmarks)
 mount_s3:
@@ -54,8 +55,6 @@ benchmarks:
       - sequential_read
     fio_io_engine: "psync"
     iteration: 0
-    block_size: 262144  # 256 KiB, matching read_size default
-    run_time: 30  # Default run time in seconds
   
   prefetch:
     # Prefetch-specific parameters
@@ -73,9 +72,10 @@ hydra:
       # Common parameters for all benchmark types
       'application_workers': 1
       'iteration': "range(${iterations})"
+      'benchmark_type': "fio", "prefetch_benchmark"
       
       # Conditional parameters based on benchmark type
       # These will only be used when the corresponding benchmark type is selected
-      'benchmarks.fio.fuse_threads': 1, 16
+      'benchmarks.fio.fuse_threads': 1
       'benchmarks.fio.direct_io': false, true
       'fio_benchmark': "${join:',', ${fio_benchmarks}}"
