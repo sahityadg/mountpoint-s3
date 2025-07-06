@@ -181,8 +181,83 @@ def _run_benchmark(cfg: DictConfig, mount_dir: str) -> None:
     
     if benchmark_type == "fio":
         _run_fio(cfg, mount_dir)
+    elif benchmark_type == "prefetch_benchmark":
+        _run_prefetch_benchmark(cfg, mount_dir)
     else:
         raise ValueError(f"Unknown benchmark type: {benchmark_type}")
+
+
+def _run_prefetch_benchmark(cfg: DictConfig, mount_dir: str) -> None:
+    """
+    Run the prefetch benchmark against the file system.
+    This benchmark tests the prefetching capabilities of Mountpoint-S3.
+    """
+    prefetch_cfg = cfg.get("benchmarks", {}).get("prefetch", {})
+
+    # Path to the prefetch_benchmark binary - use absolute path
+    import os
+    prefetch_binary = os.path.join(os.getcwd(), "target/release/examples/prefetch_benchmark")
+
+    subprocess_args = [
+        prefetch_binary,
+        cfg["s3_bucket"],
+    ]
+
+    # Generate S3 keys based on application_workers
+    object_size = cfg.get("object_size", "100GiB")
+    size_gib = "100"  # Default value
+    if object_size.endswith("GiB"):
+        size_gib = object_size[:-3]
+        
+    app_workers = cfg.get('application_workers', 1)
+    for i in range(app_workers):
+        subprocess_args.append(f"j{i}_{size_gib}GiB.bin")
+    
+    # Add optional parameters
+    region = cfg.get("region", "us-east-1")
+    subprocess_args.extend(["--region", region])
+    
+    max_throughput = cfg.get('maximum_throughput_gbps')
+    if max_throughput is None:
+        max_throughput = cfg['network'].get('maximum_throughput_gbps')
+    
+    if max_throughput is not None:
+        subprocess_args.extend(["--maximum-throughput-gbps", str(max_throughput)])
+    
+    if cfg.get("crt_memory_limit_gib") is not None:
+        subprocess_args.extend(["--crt-memory-limit-gib", str(cfg.get("crt_memory_limit_gib"))])
+    
+    max_memory_target = prefetch_cfg.get("max_memory_target")
+    if max_memory_target is not None:
+        subprocess_args.extend(["--max-memory-target", str(max_memory_target)])
+    
+    part_size = cfg.get("part_size")
+    if part_size is not None:
+        subprocess_args.extend(["--part-size", str(part_size)])
+    
+    read_size = cfg.get("read_size")
+    if read_size is not None:
+        subprocess_args.extend(["--read-size", str(read_size)])
+    
+    iterations = cfg.get("iterations", 1)
+    subprocess_args.extend(["--iterations", str(iterations)])
+    
+    downloads_per_object = cfg.get('application_workers', 1)
+    subprocess_args.extend(["--downloads-per-object", str(downloads_per_object)])
+    
+    if cfg['network']['interface_names']:
+        for interface in cfg['network']['interface_names']:
+            subprocess_args.extend(["--bind", interface])
+    
+    log.info("Running prefetch benchmark with args: %s", subprocess_args)
+    
+    with Popen(subprocess_args) as process:
+        exit_code = process.wait()
+        if exit_code != 0:
+            log.error(f"Prefetch benchmark process failed with exit code {exit_code}")
+            raise subprocess.CalledProcessError(exit_code, subprocess_args)
+        else:
+            log.info("Prefetch benchmark process completed successfully")
 
 
 def _run_fio(cfg: DictConfig, mount_dir: str) -> None:
