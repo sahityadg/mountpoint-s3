@@ -8,7 +8,7 @@ import signal
 import subprocess
 from subprocess import Popen
 import tempfile
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Union
 import urllib.request
 
 import hydra
@@ -58,7 +58,7 @@ class MountError(Exception):
 def _mount_mp(
     cfg: DictConfig,
     mount_dir: str,
-) -> dict[str, any] | MountError | subprocess.CalledProcessError:
+) -> Union[Dict[str, Any], MountError, subprocess.CalledProcessError]:
     """
     Mount an S3 bucket using Mountpoint,
     using the configuration to apply Mountpoint arguments.
@@ -133,7 +133,9 @@ def _mount_mp(
 
     for network_interface in cfg['network']['interface_names']:
         subprocess_args.append(f"--bind={network_interface}")
-    if (max_throughput := cfg['network'].get('maximum_throughput_gbps')) is not None:
+    
+    max_throughput = cfg['network'].get('maximum_throughput_gbps')
+    if max_throughput is not None:
         if stub_mode == "s3_client":
             raise ValueError(
                 "should not use `stub_mode=s3_client` with `maximum_throughput_gbps`, throughput will be limited"
@@ -177,7 +179,6 @@ def _run_benchmark(cfg: DictConfig, mount_dir: str) -> None:
     Run the selected benchmark based on the configuration.
     """
     benchmark_type = cfg.get("benchmark_type", "fio").lower()
-    
     log.info(f"Running benchmark type: {benchmark_type}")
     
     if benchmark_type == "fio":
@@ -194,14 +195,12 @@ def _run_prefetch_benchmark(cfg: DictConfig, mount_dir: str) -> None:
     This benchmark tests the prefetching capabilities of Mountpoint-S3.
     """
     prefetch_cfg = cfg.get("benchmarks", {}).get("prefetch", {})
-
-    # Path to the prefetch_benchmark binary - use absolute path
-    import os
-    prefetch_binary = os.path.join(os.getcwd(), "target/release/examples/prefetch_benchmark")
-
     subprocess_args = [
-        prefetch_binary,
-        cfg["s3_bucket"],
+        "cargo",
+        "run",
+        "--example",
+        "prefetch_benchmark",
+       cfg["s3_bucket"],
     ]
 
     # Generate S3 keys based on application_workers
@@ -225,8 +224,9 @@ def _run_prefetch_benchmark(cfg: DictConfig, mount_dir: str) -> None:
     if max_throughput is not None:
         subprocess_args.extend(["--maximum-throughput-gbps", str(max_throughput)])
     
-    if cfg.get("crt_memory_limit_gib") is not None:
-        subprocess_args.extend(["--crt-memory-limit-gib", str(cfg.get("crt_memory_limit_gib"))])
+    crt_memory_limit = cfg.get("crt_memory_limit_gib")
+    if crt_memory_limit is not None:
+        subprocess_args.extend(["--crt-memory-limit-gib", str(crt_memory_limit)])
     
     max_memory_target = prefetch_cfg.get("max_memory_target")
     if max_memory_target is not None:
@@ -241,24 +241,23 @@ def _run_prefetch_benchmark(cfg: DictConfig, mount_dir: str) -> None:
     
     iterations = cfg.get("iterations", 1)
     subprocess_args.extend(["--iterations", str(iterations)])
-    
-    if cfg['network']['interface_names']:
+
+    if cfg['network'].get('interface_names'):
         for interface in cfg['network']['interface_names']:
             subprocess_args.extend(["--bind", interface])
 
     if cfg['run_time'] is not None:
-        subprocess_args.extend("--max-runtime", cfg['run_time'])
+        subprocess_args.extend(["--runtime", str(cfg['run_time'])])
     
     log.info("Running prefetch benchmark with args: %s", subprocess_args)
-    
+            
     with Popen(subprocess_args) as process:
         exit_code = process.wait()
         if exit_code != 0:
-            log.error(f"Prefetch benchmark process failed with exit code {exit_code}")
+            log.error(f"Prefetch benchmark failed with exit code {exit_code}")
             raise subprocess.CalledProcessError(exit_code, subprocess_args)
         else:
-            log.info("Prefetch benchmark process completed successfully")
-
+            log.info("Prefetch benchmarks completed successfully")
 
 def _run_fio(cfg: DictConfig, mount_dir: str) -> None:
     """
@@ -288,7 +287,7 @@ def _run_fio(cfg: DictConfig, mount_dir: str) -> None:
     subprocess_env["UNIQUE_DIR"] = datetime.now(tz=timezone.utc).isoformat()
     subprocess_env["IO_ENGINE"] = fio_cfg.get('fio_io_engine', 'psync')
     subprocess_env["BLOCK_SIZE"] = str(cfg.get('read_size', DEFAULT_READ_SIZE))
-    subprocess_env["RUN_TIME"] = str(cfg('run_time', 30))
+    subprocess_env["RUN_TIME"] = str(cfg.get('run_time', 30))
     log.info("Running FIO with args: %s; env: %s", subprocess_args, subprocess_env)
 
     with Popen(subprocess_args, env=subprocess_env) as process:
@@ -329,12 +328,12 @@ def _collect_logs() -> None:
     os.rmdir(logs_directory)
 
 
-def _write_metadata(metadata: dict[str, any]) -> None:
+def _write_metadata(metadata: Dict[str, Any]) -> None:
     with open("metadata.json", "w") as f:
         json.dump(metadata, f, default=str)
 
 
-def _postprocessing(metadata: dict[str, any]) -> None:
+def _postprocessing(metadata: Dict[str, Any]) -> None:
     # Only collect logs for FIO benchmarks (which use Mountpoint)
     benchmark_type = metadata.get("benchmark_type", "fio").lower()
     if benchmark_type == "fio":
@@ -504,13 +503,14 @@ def run_experiment(cfg: DictConfig) -> None:
             target_pid = mount_metadata["mp_pid"]
 
             try:
-                with ResourceMonitoring.managed(target_pid, cfg['with_bwm'], cfg['with_perf_stat']):
+                with ResourceMonitoring.managed(target_pid, cfg.get('with_bwm', False), cfg.get('with_perf_stat', False)):
                     _run_benchmark(cfg, mount_dir)
                 metadata["success"] = True
             except Exception as e:
                 log.error(f"Error running experiment: {e}", exc_info=True)
     else:
         try:
+            # For non-fio benchmarks, we don't need to mount anything
             _run_benchmark(cfg, None)
             metadata["success"] = True
         except Exception as e:

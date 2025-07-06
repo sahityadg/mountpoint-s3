@@ -2,8 +2,9 @@
 # as well as some which will be 'swept' over for experiments.
 
 defaults:
-benchmark_type: "fio"  # Options: fio, prefetch_benchmark, client_benchmark, crt_benchmark
   - _self_
+
+benchmark_type: "fio"  # Options: fio, prefetch_benchmark, client_benchmark, crt_benchmark
 
 s3_bucket: ???
 s3_prefix: !!null
@@ -38,7 +39,7 @@ network:
   interface_names: []
   maximum_throughput_gbps: !!null
 
-iterations: 1
+iterations: 1 
 
 # For monitoring network bandwidth
 with_bwm: false
@@ -65,17 +66,18 @@ hydra:
     app_name: benchmark
     header: |
       Benchmark for Mountpoint for Amazon S3
+  mode: MULTIRUN
   job:
     chdir: true
   sweeper:
     params:
       # Common parameters for all benchmark types
-      'application_workers': 1
-      'iteration': "range(${iterations})"
-      'benchmark_type': "fio", "prefetch_benchmark"
+      'application_workers': 1, 16, 64
+      '+iteration': "range(${iterations})"
+      'benchmark_type': "prefetch_benchmark"
       
       # Conditional parameters based on benchmark type
       # These will only be used when the corresponding benchmark type is selected
-      'benchmarks.fio.fuse_threads': 1
+      'benchmarks.fio.fuse_threads': 1, 16
       'benchmarks.fio.direct_io': false, true
-      'fio_benchmark': "${join:',', ${fio_benchmarks}}"
+      'benchmarks.fio.fio_benchmark': "${join:',', ${fio_benchmarks}}"
