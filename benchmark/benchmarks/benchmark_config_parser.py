@@ -24,6 +24,21 @@ class BenchmarkConfigParser:
         """
         self.cfg = cfg
 
+    def _parse_comma_separated_string_to_array(self, comma_separated_string: str) -> list:
+        if not comma_separated_string:
+            return []
+        keys = [key.strip() for key in comma_separated_string.split(',')]
+
+        # Filter out any empty keys
+        keys = [key for key in keys if key]
+        return keys
+
+    def _default_object_keys(self, app_workers, object_size_in_gib) -> list:
+        keys = []
+        for i in range(app_workers):
+            keys.append(f"j{i}_{object_size_in_gib}GiB.bin")
+        return keys
+
     def get_common_config(self) -> Dict[str, Any]:
         """
         Get all common configuration parameters with appropriate defaults.
@@ -31,11 +46,13 @@ class BenchmarkConfigParser:
         Returns:
             Dictionary containing all common configuration parameters
         """
+        objects = self._parse_comma_separated_string_to_array(getattr(self.cfg, 'objects', None))
         return {
             'application_workers': getattr(self.cfg, 'application_workers', 1),
             'benchmark_type': getattr(self.cfg, 'benchmark_type', 'fio'),
             'max_throughput_gbps': self.cfg.network.maximum_throughput_gbps,
             'network_interfaces': self.cfg.network.interface_names,
+            'objects': objects,
             'object_size_in_gib': getattr(self.cfg, 'object_size_in_gib', 100),
             'read_part_size': getattr(self.cfg, 'read_part_size', None),
             'read_size': getattr(self.cfg, 'read_size', 262144),  # 256 KiB
@@ -79,4 +96,17 @@ class BenchmarkConfigParser:
             'fio_benchmark': getattr(fio_cfg, 'fio_benchmark', 'sequential_read'),
             'fio_io_engine': getattr(fio_cfg, 'fio_io_engine', 'psync'),
             'fuse_threads': getattr(fio_cfg, 'fuse_threads', None),
+        }
+
+    def get_prefetch_config(self) -> Dict[str, Any]:
+        """
+        Get the prefetch configuration with appropriate defaults.
+
+        Returns:
+            Dictionary containing prefetch configuration parameters
+        """
+        prefetch_cfg = self.cfg.benchmarks.prefetch
+        objects = self._parse_comma_separated_string_to_array(getattr(prefetch_cfg, 'objects', None))
+        return {
+            'max_memory_target': getattr(prefetch_cfg, 'max_memory_target', None),
         }

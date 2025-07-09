@@ -1,18 +1,21 @@
-# This file (and others in `conf/`) specify some static parameters,
-# as well as some which will be 'swept' over for experiments.
-
+# Main configuration file for benchmarks
 defaults:
   - _self_
 
 # ===== Common parameters for all benchmarks =====
 s3_bucket: ???
+
 application_workers: 1
 iterations: 1
 run_time: 30  # Default run time in seconds
 read_part_size: !!null
 write_part_size: 16777216  # 16 MiB, to allow for uploads of large files
+read_size: 262144  # 256 KiB
 object_size_in_gib: 100  # Size of the object to benchmark
-benchmark_type: "fio"
+# When specifying object keys via the command line,  quote the list to
+# prevent Hydra from treating a comma-separated value as a separate
+# item to iterate through. Currently, fio bencmarks don't use this.
+objects: !!null
 
 # Network configuration
 network:
@@ -37,8 +40,8 @@ mountpoint:
   mountpoint_debug_crt: false
 
 # ===== Benchmark-specific configurations =====
-# FIO benchmark configuration
 benchmarks:
+  # FIO benchmark configuration
   fio:
     fuse_threads: !!null
     direct_io: false
@@ -47,8 +50,17 @@ benchmarks:
     fio_benchmark: "${benchmarks.fio.fio_benchmarks[0]}"
     fio_io_engine: "psync"
 
-iteration: 0
+  # Prefetch benchmark configuration
+  prefetch:
+    max_memory_target: !!null
+    # When specifying object keys via the command line,  quote the list to
+    # prevent Hydra from treating ach comma-separated value as a separate
+    # item to iterate through like
 
+# Default benchmark type - will be overridden by command line or multirun config
+benchmark_type: "fio"  # Supported: "fio", "prefetch"
+
+# ===== Hydra configuration =====
 hydra:
   help:
     app_name: "Mountpoint benchmark runner"
@@ -56,12 +68,23 @@ hydra:
   job:
     chdir: true
   sweeper:
+    # Global sweeper params - use this for common parameters across all benchmarks
+    # For specific parameter use sweep params under the specific benchmark type config
     params:
-      # Number of processes that will be interacting with the file.
-      'application_workers': 1, 4, 8, 16, 32, 64, 128, 256
-      'iteration': "range(${iterations})"
-      # FIO specific parameters
-      'benchmarks.fio.fuse_threads': 16, 32, 64, 128
-      # Configure if application should use Direct IO, skipping the Linux page cache
-      'benchmarks.fio.direct_io': false, true
-      'benchmarks.fio.fio_benchmark': "${join:',', ${benchmarks.fio.fio_benchmarks}}"
+      'application_workers': 1, 16, 64
+      '+iteration': "range(${iterations})"
+
+# ===== Separate multirun configurations =====
+fio_multirun:
+  benchmark_type: fio
+  hydra:
+    sweeper:
+      params:
+        'benchmarks.fio.direct_io': false, true
+
+prefetch_multirun:
+  benchmark_type: prefetch
+  hydra:
+    sweeper:
+      params:
+        # 'benchmarks.prefetch.max_memory_target': !!null, 1073741824, 2147483648  # null, 1GB, 2GB
