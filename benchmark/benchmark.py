@@ -13,6 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from benchmarks.benchmark_config_parser import BenchmarkConfigParser
 from benchmarks.fio_benchmark import FioBenchmark
+from benchmarks.prefetch_benchmark import PrefetchBenchmark
 
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 
@@ -171,6 +172,8 @@ def run_experiment(cfg: DictConfig) -> None:
         # Create and run the appropriate benchmark
         if benchmark_type == "fio":
             benchmark = FioBenchmark(cfg)
+        elif benchmark_type == "prefetch":
+            benchmark = PrefetchBenchmark(cfg)
         else:
             raise ValueError(f"Unsupported benchmark type: {benchmark_type}")
 

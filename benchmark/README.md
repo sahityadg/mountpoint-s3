@@ -10,10 +10,15 @@ Configurations in `conf/` describe which values to configure to run experiments 
 such as the maximum count of Mountpoint FUSE workers,
 number of application workers reading from unique file handles, etc..
 
-The benchmark script currently supports FIO jobs.
-The list is defined in `conf/config.yaml` under the `fio_benchmarks` config entry.
-The FIO jobs define what workload they run,
-and also use environment variables in the job definition to allow this script to vary parameters.
+The benchmark script supports multiple benchmark types, controlled by the `benchmark_type` parameter.
+
+## Benchmark Types
+
+The benchmark script supports the following benchmark types:
+
+1. **FIO benchmark** (`benchmark_type=fio`) - Default benchmark type that runs FIO jobs defined in the configuration.
+
+2. **Prefetch benchmark** (`benchmark_type=prefetch`) - Runs Mountpoint's prefetcher benchmarks to test the performance of prefetcher. 
 
 ## Before you start
 
@@ -44,16 +49,41 @@ You must set this in order to be able to use the benchmark script.
 Additionally, you should configure the AWS credentials for Mountpoint.
 You might use AWS profiles or set some credentials in the environment.
 
-To run the experiment, you can execute a command like this:
+### Running the FIO benchmark (default)
 
-```
+To run the default FIO benchmark experiment:
+
+```sh
 uv run benchmark.py -- s3_bucket=amzn-s3-demo-bucket
 ```
 
-This will run the default experiment, including many different configuration combinations.
+Or explicitly specify the benchmark type:
+
+```sh
+uv run benchmark.py benchmark_type=fio -- s3_bucket=amzn-s3-demo-bucket
+```
+
+### Running the Prefetch benchmark
+
+To run the prefetch benchmark:
+
+```sh
+uv run benchmark.py benchmark_type=prefetch -- s3_bucket=amzn-s3-demo-bucket
+```
+
+When using the prefetch benchmark, you can specify object keys to use:
+
+```sh
+uv run benchmark.py benchmark_type=prefetch -- s3_bucket=amzn-s3-demo-bucket \
+    "benchmarks.prefetch.objects=j1_100GiB.bin,j2_100GiB.bin,j3_100GiB.bin,j4_100GiB.bin"
+```
+
+Note: When passing object names from the command line, quote the entire parameter to avoid
+iterating through each object key. When not specified, the tests fall back to using
+`j{i}_{object_size}GiB.bin`, with i starting from 0.
+
 Output is written to `multirun/` within directories for the date, time, and experiment number run.
-The output directory includes a few different files from an individual experiment run,
-including the individual benchmark output `benchmark.log`, FIO output, and Mountpoint logs.
+The output directory includes benchmark-specific files such as logs and results.
 
 ## Advanced configuration
 
