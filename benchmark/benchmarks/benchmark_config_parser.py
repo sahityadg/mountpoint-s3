@@ -24,6 +24,15 @@ class BenchmarkConfigParser:
         """
         self.cfg = cfg
 
+    def _parse_comma_separated_string_to_array(self, comma_separated_string: str) -> list:
+        if not comma_separated_string:
+            return []
+        keys = [key.strip() for key in comma_separated_string.split(',')]
+
+        # Filter out any empty keys
+        keys = [key for key in keys if key]
+        return keys
+
     def get_common_config(self) -> Dict[str, Any]:
         """
         Get all common configuration parameters with appropriate defaults.
@@ -79,4 +88,18 @@ class BenchmarkConfigParser:
             'fio_benchmark': getattr(fio_cfg, 'fio_benchmark', 'sequential_read'),
             'fio_io_engine': getattr(fio_cfg, 'fio_io_engine', 'psync'),
             'fuse_threads': getattr(fio_cfg, 'fuse_threads', None),
+        }
+
+    def get_prefetch_config(self) -> Dict[str, Any]:
+        """
+        Get the prefetch configuration with appropriate defaults.
+
+        Returns:
+            Dictionary containing prefetch configuration parameters
+        """
+        prefetch_cfg = self.cfg.benchmarks.prefetch
+        objects = self._parse_comma_separated_string_to_array(getattr(prefetch_cfg, 'objects', None))
+        return {
+            'max_memory_target': getattr(prefetch_cfg, 'max_memory_target', None),
+            'objects': objects,
         }
