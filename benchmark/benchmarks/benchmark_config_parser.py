@@ -1,7 +1,3 @@
-"""
-Utility functions for benchmarks.
-"""
-
 import logging
 from typing import Any, Dict
 
@@ -47,6 +43,7 @@ class BenchmarkConfigParser:
             Dictionary containing all common configuration parameters
         """
         objects = self._parse_comma_separated_string_to_array(getattr(self.cfg, 'objects', None))
+
         return {
             'application_workers': getattr(self.cfg, 'application_workers', 1),
             'benchmark_type': getattr(self.cfg, 'benchmark_type', 'fio'),
@@ -106,7 +103,18 @@ class BenchmarkConfigParser:
             Dictionary containing prefetch configuration parameters
         """
         prefetch_cfg = self.cfg.benchmarks.prefetch
-        objects = self._parse_comma_separated_string_to_array(getattr(prefetch_cfg, 'objects', None))
         return {
             'max_memory_target': getattr(prefetch_cfg, 'max_memory_target', None),
         }
+
+    def get_crt_config(self) -> Dict[str, Any]:
+        """
+        Get the CRT configuration with appropriate defaults.
+
+        Returns:
+            Dictionary containing CRT configuration parameters
+        """
+        crt_cfg = self.cfg.benchmarks.crt
+        return {
+            'crt_benchmarks_path': getattr(crt_cfg, 'crt_benchmarks_path', None),
+

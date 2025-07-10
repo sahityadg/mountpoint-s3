@@ -57,6 +57,12 @@ benchmarks:
     # prevent Hydra from treating ach comma-separated value as a separate
     # item to iterate through like
 
+  # CRT benchmark configuration
+  crt:
+    crt_benchmarks_path: !!null
+    crt_benchmark: "${benchmarks.crt.crt_benchmarks[0]}"
+
+
 # Default benchmark type - will be overridden by command line or multirun config
 benchmark_type: "fio"  # Supported: "fio", "prefetch"
 
