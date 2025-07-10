@@ -200,6 +200,29 @@ struct CliArgs {
     pub output_file: Option<PathBuf>,
 }
 
+fn create_s3_client_config(region: &String, args: &CliArgs, bind: &Option<Vec<String>>) -> S3ClientConfig {
+    let mut config = S3ClientConfig::new().endpoint_config(EndpointConfig::new(&region));
+
+    config = config.throughput_target_gbps(args.throughput_target_gbps);
+    config = config.memory_limit_in_bytes(args.crt_memory_limit_gb * 1024 * 1024 * 1024);
+
+    if let Some(interfaces) = bind {
+        config = config.network_interface_names(interfaces.clone());
+    }
+
+    config = config.part_size(args.part_size);
+
+    if args.enable_backpressure {
+        config = config.read_backpressure(true);
+        config = config.initial_read_window(
+            args.initial_window_size
+                .expect("read window size is required when backpressure is enabled"),
+        );
+    }
+
+    config
+}
+
 fn main() {
     init_tracing_subscriber();
 
@@ -207,25 +230,12 @@ fn main() {
 
     match args.client {
         Client::Real {
-            bucket,
-            key,
-            region,
-            bind,
+            ref bucket,
+            ref key,
+            ref region,
+            ref bind,
         } => {
-            let mut config = S3ClientConfig::new().endpoint_config(EndpointConfig::new(&region));
-            config = config.throughput_target_gbps(args.throughput_target_gbps);
-            config = config.memory_limit_in_bytes(args.crt_memory_limit_gb * 1024 * 1024 * 1024);
-            if let Some(interfaces) = &bind {
-                config = config.network_interface_names(interfaces.clone());
-            }
-            config = config.part_size(args.part_size);
-            if args.enable_backpressure {
-                config = config.read_backpressure(true);
-                config = config.initial_read_window(
-                    args.initial_window_size
-                        .expect("read window size is required when backpressure is enabled"),
-                );
-            }
+            let config = create_s3_client_config(&region, &args, &bind);
             let client = S3CrtClient::new(config).expect("couldn't create client");
 
             run_benchmark(
