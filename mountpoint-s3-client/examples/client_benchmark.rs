@@ -3,7 +3,7 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use futures::StreamExt;
@@ -38,13 +38,16 @@ fn run_benchmark(
     keys: &[String],
     enable_backpressure: bool,
     output_path: Option<&Path>,
+    max_duration: Option<Duration>,
 ) {
     let mut total_bytes = 0;
     let total_start = Instant::now();
     let mut iter_results = Vec::new();
+    let mut iteration = 0;
+    let start_time = Instant::now();
 
-    for i in 0..num_iterations {
-        let start = Instant::now();
+    while iteration < num_iterations && start_time.elapsed() < max_duration.unwrap_or(Duration::MAX) {
+        let iter_start = Instant::now();
         let received_size = Arc::new(AtomicU64::new(0));
 
         thread::scope(|scope| {
@@ -68,7 +71,7 @@ fn run_benchmark(
                         }
 
                         let mut request = pin!(request);
-                        loop {
+                        while start_time.elapsed() < max_duration.unwrap_or(Duration::MAX) {
                             match request.next().await {
                                 Some(Ok(part)) => {
                                     let part_len = part.data.len();
@@ -107,32 +110,42 @@ fn run_benchmark(
             }
         });
 
-        let elapsed = start.elapsed();
+        let elapsed = iter_start.elapsed();
         let received_size = received_size.load(Ordering::SeqCst);
         total_bytes += received_size;
         println!(
             "{}: received {} bytes in {:.2}s: {:.2} Gib/s",
-            i,
+            iteration,
             received_size,
             elapsed.as_secs_f64(),
             (received_size as f64) / elapsed.as_secs_f64() / (1024 * 1024 * 1024 / 8) as f64
         );
 
         iter_results.push(json!({
-            "iteration": i,
+            "iteration": iteration,
             "bytes": received_size,
             "duration_seconds": elapsed.as_secs_f64(),
         }));
+
+        iteration += 1;
     }
 
     let total_elapsed = total_start.elapsed();
+    println!(
+        "Total: received {} bytes in {:.2}s across {} iterations: {:.2} Gib/s",
+        total_bytes,
+        total_elapsed.as_secs_f64(),
+        iter_results.len(),
+        (total_bytes as f64) / total_elapsed.as_secs_f64() / (1024 * 1024 * 1024 / 8) as f64
+    );
+
     if let Some(output_path) = output_path {
         let ouput_file = std::fs::File::create(output_path).expect("Failed to create output_file: {output_path}");
         let results = json!({
             "summary": {
                 "total_bytes": total_bytes,
                 "duration_seconds": total_elapsed.as_secs_f64(),
-                "iterations": num_iterations,
+                "iterations": iter_results.len(),
             },
             "iterations": iter_results
         });
@@ -195,7 +208,18 @@ struct CliArgs {
     )]
     initial_window_size: Option<usize>,
     #[clap(long, help = "Output file to write the results to", value_name = "OUTPUT_FILE")]
-    pub output_file: Option<PathBuf>,
+    output_file: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Maximum duration (in seconds) to run the benchmark",
+        value_name = "SECONDS",
+        value_parser = |arg: &str| -> Result<Duration, String> {
+            arg.parse::<u64>()
+            .map(Duration::from_secs)
+            .map_err(|e| format!("Invalid duration: {e}"))
+        }
+    )]
+    max_duration: Option<Duration>,
 }
 
 fn create_s3_client_config(region: &String, args: &CliArgs, bind: &Option<Vec<String>>) -> S3ClientConfig {
@@ -243,7 +267,6 @@ fn main() {
             let client = S3CrtClient::new(config).expect("couldn't create client");
             let key_list: Vec<String> = keys.split(',').map(|k| k.trim().to_string()).collect();
 
-            
             if key_list.is_empty() {
                 eprintln!("Error: No keys specified");
                 std::process::exit(1);
@@ -256,6 +279,7 @@ fn main() {
                 &key_list,
                 args.enable_backpressure,
                 args.output_file.as_deref(),
+                args.max_duration,
             );
         }
         Client::Mock { object_size } => {
@@ -281,6 +305,7 @@ fn main() {
                 &key_list,
                 args.enable_backpressure,
                 args.output_file.as_deref(),
+                args.max_duration,
             );
         }
     }
