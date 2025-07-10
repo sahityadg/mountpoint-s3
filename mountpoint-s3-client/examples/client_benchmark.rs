@@ -34,9 +34,8 @@ fn init_tracing_subscriber() {
 fn run_benchmark(
     client: impl ObjectClient + Clone + Send,
     num_iterations: usize,
-    num_downloads: usize,
     bucket: &str,
-    key: &str,
+    keys: &[String],
     enable_backpressure: bool,
     output_path: Option<&Path>,
 ) {
@@ -49,14 +48,15 @@ fn run_benchmark(
         let received_size = Arc::new(AtomicU64::new(0));
 
         thread::scope(|scope| {
-            for _ in 0..num_downloads {
+            for key in keys {
                 let client = client.clone();
                 let received_size_clone = Arc::clone(&received_size);
+                let key_clone = key.clone();
                 scope.spawn(|| {
                     futures::executor::block_on(async move {
                         let mut received_obj_len = 0u64;
                         let mut request = client
-                            .get_object(bucket, key, &GetObjectParams::new())
+                            .get_object(bucket, &key_clone, &GetObjectParams::new())
                             .await
                             .expect("couldn't create get request");
                         let mut backpressure_handle = request.backpressure_handle().cloned();
@@ -142,12 +142,12 @@ fn run_benchmark(
 
 #[derive(Subcommand)]
 enum Client {
-    #[command(about = "Download a key from S3")]
+    #[command(about = "Download keys from S3")]
     Real {
         #[arg(help = "Bucket name")]
         bucket: String,
-        #[arg(help = "Key name")]
-        key: String,
+        #[arg(help = "Comma-separated list of key names")]
+        keys: String,
         #[arg(long, help = "AWS region", default_value = "us-east-1")]
         region: String,
         #[clap(
@@ -186,8 +186,6 @@ struct CliArgs {
     part_size: usize,
     #[arg(long, help = "Number of benchmark iterations", default_value = "1")]
     iterations: usize,
-    #[arg(long, help = "Number of concurrent downloads", default_value = "1")]
-    downloads: usize,
     #[arg(long, help = "Enable CRT backpressure mode")]
     enable_backpressure: bool,
     #[arg(
@@ -207,7 +205,13 @@ fn create_s3_client_config(region: &String, args: &CliArgs, bind: &Option<Vec<St
     config = config.memory_limit_in_bytes(args.crt_memory_limit_gb * 1024 * 1024 * 1024);
 
     if let Some(interfaces) = bind {
-        config = config.network_interface_names(interfaces.clone());
+        let nics: Vec<String> = interfaces
+            .clone()
+            .iter()
+            .flat_map(|iface| iface.split(',').map(|s| s.trim().to_string()))
+            .filter(|s| !s.is_empty())
+            .collect();
+        config = config.network_interface_names(nics);
     }
 
     config = config.part_size(args.part_size);
@@ -231,19 +235,25 @@ fn main() {
     match args.client {
         Client::Real {
             ref bucket,
-            ref key,
+            ref keys,
             ref region,
             ref bind,
         } => {
             let config = create_s3_client_config(&region, &args, &bind);
             let client = S3CrtClient::new(config).expect("couldn't create client");
+            let key_list: Vec<String> = keys.split(',').map(|k| k.trim().to_string()).collect();
+
+            
+            if key_list.is_empty() {
+                eprintln!("Error: No keys specified");
+                std::process::exit(1);
+            }
 
             run_benchmark(
                 client,
                 args.iterations,
-                args.downloads,
                 &bucket,
-                &key,
+                &key_list,
                 args.enable_backpressure,
                 args.output_file.as_deref(),
             );
@@ -261,12 +271,14 @@ fn main() {
 
             client.add_object(KEY, MockObject::ramp(0xaa, object_size as usize, ETag::for_tests()));
 
+            // For mock client, we'll use a single key
+            let key_list = vec![KEY.to_string()];
+
             run_benchmark(
                 client,
                 args.iterations,
-                args.downloads,
                 BUCKET,
-                KEY,
+                &key_list,
                 args.enable_backpressure,
                 args.output_file.as_deref(),
             );
