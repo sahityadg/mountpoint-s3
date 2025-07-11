@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -98,10 +98,15 @@ pub struct CliArgs {
 
     #[arg(
         long,
-        help = "Maximum runtime in seconds (overrides iterations if specified)",
-        value_name = "SECONDS"
+        help = "Maximum duration in seconds (overrides iterations if specified)",
+        value_name = "SECONDS",
+        value_parser = |arg: &str| -> Result<Duration, String> {
+            arg.parse::<u64>()
+            .map(Duration::from_secs)
+            .map_err(|e| format!("Invalid duration: {e}"))
+        }
     )]
-    runtime: Option<u64>,
+    max_duration: Option<Duration>,
 
     #[arg(
         long,
@@ -155,21 +160,11 @@ fn main() -> anyhow::Result<()> {
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
 
-    let runtime_exceeded = Arc::new(AtomicBool::new(false));
     let total_start = Instant::now();
-    if let Some(runtime) = args.runtime {
-        thread::spawn({
-            let runtime_exceeded = runtime_exceeded.clone();
-            move || {
-                thread::sleep(Duration::from_secs(runtime));
-                runtime_exceeded.store(true, Ordering::SeqCst);
-            }
-        });
-    }
     let mut iteration = 0;
     let mut total_bytes = 0;
     let mut iter_results = Vec::new();
-    while iteration < args.iterations && !runtime_exceeded.load(Ordering::SeqCst) {
+    while iteration < args.iterations && total_start.elapsed() < args.max_duration.unwrap_or(Duration::MAX) {
         let received_bytes = Arc::new(AtomicU64::new(0));
         let start = Instant::now();
         let manager = Prefetcher::default_builder(client.clone()).build(
@@ -187,14 +182,14 @@ fn main() -> anyhow::Result<()> {
                     let object_id = object_id.clone();
                     let request = manager.prefetch(bucket.to_string(), object_id.clone(), *size);
                     let read_size = args.read_size;
-                    let runtime_exceeded_clone = runtime_exceeded.clone();
 
                     let task = scope.spawn(move || {
                         let result = block_on(wait_for_download(
                             request,
                             *size,
                             read_size as u64,
-                            runtime_exceeded_clone,
+                            total_start,
+                            args.max_duration,
                         ));
                         if let Ok(bytes_read) = result {
                             received_bytes.fetch_add(bytes_read, Ordering::SeqCst);
@@ -259,11 +254,12 @@ async fn wait_for_download(
     mut request: PrefetchGetObject<S3CrtClient>,
     size: u64,
     read_size: u64,
-    runtime_exceeded: Arc<AtomicBool>,
+    start_time: Instant,
+    max_duration: Option<Duration>,
 ) -> Result<u64, Box<dyn Error>> {
     let mut offset = 0;
     let mut total_bytes_read = 0;
-    while offset < size && !runtime_exceeded.load(Ordering::SeqCst) {
+    while offset < size && start_time.elapsed() < max_duration.unwrap_or(Duration::MAX) {
         let bytes = request.read(offset, read_size as usize).await?;
         let bytes_read = bytes.len() as u64;
         offset += bytes_read;
