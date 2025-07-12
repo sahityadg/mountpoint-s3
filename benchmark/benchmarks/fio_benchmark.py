@@ -74,6 +74,6 @@ class FioBenchmark(BaseBenchmark):
             log.error(f"Benchmark failed: {e}")
             raise
 
-    def post_process(self) -> Dict[str, Any]:
+    def post_process(self) -> None:
         cleanup_mp(self.mount_dir)
         return self.metadata
