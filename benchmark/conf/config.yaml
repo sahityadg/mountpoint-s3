@@ -15,6 +15,9 @@ region: "us-east-1"
 write_part_size: 16777216  # 16 MiB, to allow for uploads of large files
 object_size_in_gib: 100  # Size of the object to benchmark
 benchmark_type: "fio" # fio, prefetch, client, crt
+# When specifying object keys via the command line,  quote the list to
+# prevent Hydra from treating ach comma-separated value as a separate
+# item to iterate through like
 s3_keys: !!null
 
 # Network configuration
@@ -53,9 +56,9 @@ benchmarks:
   # Prefetch benchmark configuration
   prefetch:
     max_memory_target: !!null
-    # When specifying object keys via the command line,  quote the list to
-    # prevent Hydra from treating ach comma-separated value as a separate
-    # item to iterate through like
+
+  crt:
+    crt_benchmarks_path: !!null
 
 hydra:
   help:
@@ -84,3 +87,9 @@ prefetch_multirun:
     sweeper:
       params:
         # 'benchmarks.prefetch.max_memory_target': !!null, 1073741824, 2147483648  # null, 1GB, 2GB
+
+crt_multirun:
+  benchmark_type: crt
+  hydra:
+    sweeper:
+      params:
