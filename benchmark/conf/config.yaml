@@ -57,8 +57,15 @@ benchmarks:
   prefetch:
     max_memory_target: !!null
 
+  # CRT benchmark configuration
   crt:
     crt_benchmarks_path: !!null
+
+  client:  
+    # None 
+
+  client_backpressure:
+    read_window_size: !!null 
 
 hydra:
   help:
@@ -93,3 +100,16 @@ crt_multirun:
   hydra:
     sweeper:
       params:
+
+client_multirun:
+  benchmark_type: client
+  hydra:
+    sweeper:
+      params:
+
+client_backpressure_multirun:
+  benchmark_type: client-bp
+  hydra:
+    sweeper:
+      params:
+        #'benchmarks.client_backpressure.read_window_size': 8388608, 2147483648
