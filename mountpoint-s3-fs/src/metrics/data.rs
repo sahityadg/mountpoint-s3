@@ -6,7 +6,7 @@ use crate::sync::{Arc, Mutex};
 pub enum MetricValue {
     Counter(u64),
     Gauge(f64),
-    Histogram(f64),
+    Histogram(Vec<f64>),
 }
 
 /// A single metric
@@ -86,7 +86,13 @@ impl Metric {
                         histogram.value_at_quantile(0.999),
                         histogram.max(),
                     );
-                    (MetricValue::Histogram(mean), fmt)
+                    let mut values = Vec::new();
+                    for value in histogram.iter_recorded() {
+                        for _ in 0..value.count_at_value() {
+                            values.push(value.value_iterated_to() as f64);
+                        }
+                    }
+                    (MetricValue::Histogram(values), fmt)
                 })
             }
         }

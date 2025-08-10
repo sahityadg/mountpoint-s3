@@ -1,6 +1,7 @@
 use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream};
 use std::time::Duration;
 
 use crate::metrics::MetricValue;
@@ -75,6 +76,22 @@ impl OtlpMetricsExporter {
                     .build(),
             )
             .with_resource(resource)
+            .with_view(|instrument: &Instrument| {
+                if matches!(instrument.kind(), opentelemetry_sdk::metrics::InstrumentKind::Histogram) {
+                    Some(
+                        Stream::builder()
+                            .with_aggregation(Aggregation::Base2ExponentialHistogram {
+                                max_size: 160,
+                                max_scale: 20,
+                                record_min_max: true,
+                            })
+                            .build()
+                            .unwrap(),
+                    )
+                } else {
+                    None
+                }
+            })
             .build();
         // Set the configured SdkMeterProvider as the global meter provider making it the default provider that will be used throughout for all OpenTelemetry metrics
         global::set_meter_provider(meter_provider);
@@ -126,9 +143,10 @@ impl OtlpMetricsExporter {
         match value {
             MetricValue::Counter(count) => self.record_counter(key, *count, attributes),
             MetricValue::Gauge(val) => self.record_gauge(key, *val, attributes),
-            MetricValue::Histogram(_mean) => {
-                // Do nothing for histograms for now
-                // Will be implemented later
+            MetricValue::Histogram(values) => {
+                for &val in values {
+                    self.record_histogram(key, val, attributes);
+                }
             }
         }
     }
