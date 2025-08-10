@@ -128,13 +128,36 @@ impl OtlpMetricsExporter {
         gauge.record(value, attributes);
     }
 
+    /// Determine the appropriate unit for a metric based on its name
+    fn get_metric_unit(name: &str) -> Option<&'static str> {
+        if name.ends_with("_us") {
+            Some("us")
+        } else if name.ends_with("_bytes") {
+            Some("By")
+        } else if name.ends_with("_mib") {
+            Some("MiBy")
+        } else if name.ends_with("_mibs") {
+            Some("Mbit/s")
+        } else {
+            None
+        }
+    }
+
     /// Record a histogram metric in OTel format
     pub fn record_histogram(&self, key: &Key, value: f64, attributes: &[KeyValue]) {
         let name = format!("mountpoint.{}", key.name());
         let mut histograms = self.histograms.lock().unwrap();
         let histogram = histograms
             .entry(name.clone())
-            .or_insert_with(|| self.meter.f64_histogram(name).build());
+            .or_insert_with(|| {
+                let mut builder = self.meter.f64_histogram(name.clone());
+                
+                if let Some(unit) = Self::get_metric_unit(&name) {
+                    builder = builder.with_unit(unit);
+                }
+                
+                builder.build()
+            });
         histogram.record(value, attributes);
     }
 
