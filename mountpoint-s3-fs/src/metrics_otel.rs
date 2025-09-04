@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use crate::metrics::MetricValue;
 use metrics::Key;
-use std::collections::HashMap;
-use std::sync::Mutex;
+use dashmap::DashMap;
 
 /// Configuration for OpenTelemetry metrics export
 #[derive(Debug, Clone)]
@@ -37,9 +36,9 @@ impl OtlpConfig {
 #[derive(Debug)]
 pub struct OtlpMetricsExporter {
     meter: opentelemetry::metrics::Meter,
-    counters: Mutex<HashMap<String, opentelemetry::metrics::Counter<u64>>>,
-    gauges: Mutex<HashMap<String, opentelemetry::metrics::Gauge<f64>>>,
-    histograms: Mutex<HashMap<String, opentelemetry::metrics::Histogram<f64>>>,
+    counters: DashMap<String, opentelemetry::metrics::Counter<u64>>,
+    gauges: DashMap<String, opentelemetry::metrics::Gauge<f64>>,
+    histograms: DashMap<String, opentelemetry::metrics::Histogram<f64>>,
 }
 
 impl OtlpMetricsExporter {
@@ -86,17 +85,16 @@ impl OtlpMetricsExporter {
 
         Ok(Self {
             meter,
-            counters: Mutex::new(HashMap::new()),
-            gauges: Mutex::new(HashMap::new()),
-            histograms: Mutex::new(HashMap::new()),
+            counters: DashMap::new(),
+            gauges: DashMap::new(),
+            histograms: DashMap::new(),
         })
     }
 
     /// Record a counter metric in OTel format
     pub fn record_counter(&self, key: &Key, value: u64, attributes: &[KeyValue]) {
         let name = format!("mountpoint.{}", key.name());
-        let mut counters = self.counters.lock().unwrap();
-        let counter = counters
+        let counter = self.counters
             .entry(name.clone())
             .or_insert_with(|| self.meter.u64_counter(name).build());
         counter.add(value, attributes);
@@ -105,8 +103,7 @@ impl OtlpMetricsExporter {
     /// Record a gauge metric in OTel format
     pub fn record_gauge(&self, key: &Key, value: f64, attributes: &[KeyValue]) {
         let name = format!("mountpoint.{}", key.name());
-        let mut gauges = self.gauges.lock().unwrap();
-        let gauge = gauges
+        let gauge = self.gauges
             .entry(name.clone())
             .or_insert_with(|| self.meter.f64_gauge(name).build());
         gauge.record(value, attributes);
@@ -115,8 +112,7 @@ impl OtlpMetricsExporter {
     /// Record a histogram metric in OTel format
     pub fn record_histogram(&self, key: &Key, value: f64, attributes: &[KeyValue]) {
         let name = format!("mountpoint.{}", key.name());
-        let mut histograms = self.histograms.lock().unwrap();
-        let histogram = histograms
+        let histogram = self.histograms
             .entry(name.clone())
             .or_insert_with(|| self.meter.f64_histogram(name).build());
         histogram.record(value, attributes);
