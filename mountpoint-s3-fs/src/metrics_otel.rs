@@ -1,7 +1,7 @@
 use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
-use opentelemetry_sdk::metrics::{Aggregation, Instrument, InstrumentKind, Stream, Temporality};
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream, Temporality};
 use std::convert::TryFrom;
 use std::time::Duration;
 

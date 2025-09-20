@@ -52,6 +52,8 @@ mountpoint:
   otlp_metrics: false
   otlp_endpoint: !!null # Metrics collector/agent endpoint like "http://localhost:4318"
   otlp_export_interval: !!null  # Export interval in seconds (default: 60)
+  otlp_exponential_histograms: false  # Use experimental exponential histograms instead of default buckets
+  otlp_temporality: "delta"  # Metrics temporality: "delta" (default) or "cumulative"
 
 # ===== Benchmark-specific configurations =====
 benchmarks:
