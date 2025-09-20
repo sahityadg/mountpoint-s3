@@ -1,6 +1,7 @@
 use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream};
 use std::convert::TryFrom;
 use std::time::Duration;
 
@@ -66,16 +67,43 @@ impl OtlpMetricsExporter {
         // Create a resource with no attributes to avoid default dimensions
         let resource = opentelemetry_sdk::resource::Resource::builder_empty().build();
 
-        // Create a meter provider with the OTLP Metric Exporter that will collect and export metrics at regular intervals
-        let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
-            // The default interval is 60 seconds so we use a PeriodicReader to allow us to specify a custom interval duration
+        // Check if exponential histograms are requested via environment variable
+        let use_exponential_histograms = std::env::var("UNSTABLE_MOUNTPOINT_OTLP_EXPONENTIAL_HISTOGRAMS")
+            .map(|v| v.to_lowercase() == "true" || v == "1")
+            .unwrap_or(false);
+
+        // Create meter provider with conditional histogram configuration
+        let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
             .with_reader(
                 opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
                     .with_interval(Duration::from_secs(config.interval_secs))
                     .build(),
             )
-            .with_resource(resource)
-            .build();
+            .with_resource(resource);
+
+        let meter_provider = if use_exponential_histograms {
+            meter_provider_builder
+                .with_view(|instrument: &Instrument| {
+                    if matches!(instrument.kind(), opentelemetry_sdk::metrics::InstrumentKind::Histogram) {
+                        Some(
+                            Stream::builder()
+                                .with_aggregation(Aggregation::Base2ExponentialHistogram {
+                                    max_size: 160,
+                                    max_scale: 20,
+                                    record_min_max: true,
+                                })
+                                .build()
+                                .unwrap(),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .build()
+        } else {
+            // Use OpenTelemetry default histogram buckets (no .with_view() needed)
+            meter_provider_builder.build()
+        };
         // Set the configured SdkMeterProvider as the global meter provider making it the default provider that will be used throughout for all OpenTelemetry metrics
         global::set_meter_provider(meter_provider);
 
