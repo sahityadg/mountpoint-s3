@@ -7,8 +7,6 @@
 pub use crate::metrics_otel::OtlpConfig;
 #[cfg(feature = "otlp_integration")]
 use crate::metrics_otel::OtlpMetricsExporter;
-#[cfg(feature = "otlp_integration")]
-use opentelemetry::KeyValue;
 
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -130,45 +128,73 @@ impl MetricsSink {
                     ));
                 }
 
-                // Use TryInto to convert OtlpConfig to OtlpMetricsExporter
-                let otlp_exporter = match std::convert::TryInto::<OtlpMetricsExporter>::try_into(&config) {
+                // Use TryInto to convert OtlpConfig to OtlpMetricsExporter to validate configuration
+                match std::convert::TryInto::<OtlpMetricsExporter>::try_into(&config) {
                     Ok(exporter) => {
                         tracing::info!("OpenTelemetry metrics export enabled to {}", config.endpoint);
-                        Some(exporter)
+                        Ok(Self {
+                            metrics: DashMap::with_capacity(64),
+                            otlp_exporter: Some(exporter),
+                        })
                     }
                     Err(e) => {
                         tracing::error!("Failed to initialise OTLP exporter: {}", e);
-
-                        // If the user explicitly requested metrics export but it failed,
-                        // we should return an error rather than silently continuing without metrics
-                        return Err(anyhow::anyhow!(
+                        Err(anyhow::anyhow!(
                             "Failed to initialize OTLP metrics exporter: {}. If metrics export is not required, omit the OTLP configuration.",
                             e
-                        ));
+                        ))
                     }
-                };
-
-                Ok(Self {
-                    metrics: DashMap::with_capacity(64),
-                    #[cfg(feature = "otlp_integration")]
-                    otlp_exporter,
-                })
+                }
             }
         }
     }
+
     fn counter(&self, key: &Key) -> metrics::Counter {
-        let entry = self.metrics.entry(key.clone()).or_insert_with(Metric::counter);
-        entry.as_counter()
+        let metric = self.metrics.entry(key.clone()).or_insert_with(|| {
+            #[cfg(feature = "otlp_integration")]
+            if let Some(exporter) = &self.otlp_exporter {
+                let otlp_counter = exporter.create_counter_instrument(key.name().to_string());
+                let attributes: Vec<opentelemetry::KeyValue> = key
+                    .labels()
+                    .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
+                    .collect();
+                return Metric::Counter(Arc::new(data::ValueAndCount::with_otlp(otlp_counter, attributes)));
+            }
+            Metric::counter()
+        });
+        metric.as_counter()
     }
 
     fn gauge(&self, key: &Key) -> metrics::Gauge {
-        let entry = self.metrics.entry(key.clone()).or_insert_with(Metric::gauge);
-        entry.as_gauge()
+        let metric = self.metrics.entry(key.clone()).or_insert_with(|| {
+            #[cfg(feature = "otlp_integration")]
+            if let Some(exporter) = &self.otlp_exporter {
+                let otlp_gauge = exporter.create_gauge_instrument(key.name().to_string());
+                let attributes: Vec<opentelemetry::KeyValue> = key
+                    .labels()
+                    .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
+                    .collect();
+                return Metric::Gauge(Arc::new(data::AtomicGauge::with_otlp(otlp_gauge, attributes)));
+            }
+            Metric::gauge()
+        });
+        metric.as_gauge()
     }
 
     fn histogram(&self, key: &Key) -> metrics::Histogram {
-        let entry = self.metrics.entry(key.clone()).or_insert_with(Metric::histogram);
-        entry.as_histogram()
+        let metric = self.metrics.entry(key.clone()).or_insert_with(|| {
+            #[cfg(feature = "otlp_integration")]
+            if let Some(exporter) = &self.otlp_exporter {
+                let otlp_histogram = exporter.create_histogram_instrument(key.name().to_string());
+                let attributes: Vec<opentelemetry::KeyValue> = key
+                    .labels()
+                    .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
+                    .collect();
+                return Metric::Histogram(Arc::new(data::Histogram::with_otlp(otlp_histogram, attributes)));
+            }
+            Metric::histogram()
+        });
+        metric.as_histogram()
     }
 }
 
@@ -182,8 +208,8 @@ impl MetricsSink {
         for mut entry in self.metrics.iter_mut() {
             let (key, metric) = entry.pair_mut();
 
-            // Get both the value and string representation of the metric (this also resets the metric)
-            let Some((_, metric_str)) = metric.value_and_fmt_and_reset() else {
+            // Get the string representation of the metric (this also resets the metric)
+            let Some(metric_str) = metric.fmt_and_reset() else {
                 continue;
             };
 
@@ -220,22 +246,10 @@ impl MetricsSink {
         for mut entry in self.metrics.iter_mut() {
             let (key, metric) = entry.pair_mut();
 
-            // Get both the value and string representation of the metric (this also resets the metric)
-            let Some((value, metric_str)) = metric.value_and_fmt_and_reset() else {
+            // Get the string representation of the metric (this also resets the metric)
+            let Some(metric_str) = metric.fmt_and_reset() else {
                 continue;
             };
-
-            // If OTLP export is enabled, send metrics to OpenTelemetry
-            if let Some(exporter) = &self.otlp_exporter {
-                // Convert labels to OpenTelemetry KeyValue pairs
-                let attributes: Vec<KeyValue> = key
-                    .labels()
-                    .map(|label| KeyValue::new(label.key().to_string(), label.value().to_string()))
-                    .collect();
-
-                // Record the metric using its value
-                exporter.record_metric(key, &value, &attributes);
-            }
 
             let labels = if key.labels().len() == 0 {
                 String::new()
@@ -555,5 +569,93 @@ mod tests {
         let otlp_config = OtlpConfig::new("http://example.com:4318/v1/metrics");
         let result = MetricsSink::new(Some(MetricsConfig::Otlp(otlp_config)));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    #[cfg(feature = "otlp_integration")]
+    fn test_otlp_real_time_recording() {
+        use crate::metrics_otel::OtlpConfig;
+
+        let otlp_config = OtlpConfig::new("http://localhost:4317");
+        let sink = Arc::new(MetricsSink::new(Some(MetricsConfig::Otlp(otlp_config))).unwrap());
+        let recorder = MetricsRecorder { sink: sink.clone() };
+
+        with_local_recorder(&recorder, || {
+            metrics::counter!("test_counter", "op" => "read").increment(42);
+            metrics::gauge!("test_gauge", "status" => "active").set(100.0);
+            metrics::histogram!("test_histogram", "method" => "get").record(1.5);
+        });
+
+        assert_eq!(sink.metrics.len(), 3);
+
+        let metric_names: Vec<String> = sink
+            .metrics
+            .iter()
+            .map(|entry| entry.key().name().to_string())
+            .collect();
+
+        assert!(metric_names.contains(&"test_counter".to_string()));
+        assert!(metric_names.contains(&"test_gauge".to_string()));
+        assert!(metric_names.contains(&"test_histogram".to_string()));
+    }
+
+    #[test]
+    #[cfg(feature = "otlp_integration")]
+    fn test_otlp_concurrent_updates() {
+        use crate::metrics_otel::OtlpConfig;
+        use std::thread;
+
+        let otlp_config = OtlpConfig::new("http://localhost:4317");
+        let sink = Arc::new(MetricsSink::new(Some(MetricsConfig::Otlp(otlp_config))).unwrap());
+        let recorder = MetricsRecorder { sink: sink.clone() };
+
+        // Set global recorder so threads can access it
+        let _ = metrics::set_global_recorder(recorder);
+
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                thread::spawn(move || {
+                    for j in 0..100 {
+                        metrics::counter!("concurrent_counter").increment(1);
+                        metrics::gauge!("concurrent_gauge").set(i as f64 + j as f64);
+                        metrics::histogram!("concurrent_histogram").record((i + j) as f64);
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(sink.metrics.len(), 3);
+    }
+
+    #[test]
+    #[cfg(feature = "otlp_integration")]
+    fn test_otlp_vs_no_otlp() {
+        use crate::metrics_otel::OtlpConfig;
+
+        let sink_no_otlp = Arc::new(MetricsSink::new(None).unwrap());
+        let recorder_no_otlp = MetricsRecorder {
+            sink: sink_no_otlp.clone(),
+        };
+
+        let otlp_config = OtlpConfig::new("http://localhost:4317");
+        let sink_otlp = Arc::new(MetricsSink::new(Some(MetricsConfig::Otlp(otlp_config))).unwrap());
+        let recorder_otlp = MetricsRecorder {
+            sink: sink_otlp.clone(),
+        };
+
+        with_local_recorder(&recorder_no_otlp, || {
+            metrics::counter!("test_counter").increment(1);
+        });
+
+        with_local_recorder(&recorder_otlp, || {
+            metrics::counter!("test_counter").increment(1);
+        });
+
+        assert_eq!(sink_no_otlp.metrics.len(), 1);
+        assert_eq!(sink_otlp.metrics.len(), 1);
     }
 }

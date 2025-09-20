@@ -5,8 +5,8 @@ use std::convert::TryFrom;
 use std::time::Duration;
 
 use crate::metrics::MetricValue;
-use metrics::Key;
 use dashmap::DashMap;
+use metrics::Key;
 
 /// Configuration for OpenTelemetry metrics export
 #[derive(Debug, Clone)]
@@ -91,10 +91,26 @@ impl OtlpMetricsExporter {
         })
     }
 
+    /// Create a counter for the given name (used by register_counter)
+    pub fn create_counter_instrument(&self, name: String) -> opentelemetry::metrics::Counter<u64> {
+        self.meter.u64_counter(name).build()
+    }
+
+    /// Create a gauge for the given name (used by register_gauge)  
+    pub fn create_gauge_instrument(&self, name: String) -> opentelemetry::metrics::Gauge<f64> {
+        self.meter.f64_gauge(name).build()
+    }
+
+    /// Create a histogram for the given name (used by register_histogram)
+    pub fn create_histogram_instrument(&self, name: String) -> opentelemetry::metrics::Histogram<f64> {
+        self.meter.f64_histogram(name).build()
+    }
+
     /// Record a counter metric in OTel format
     pub fn record_counter(&self, key: &Key, value: u64, attributes: &[KeyValue]) {
         let name = format!("mountpoint.{}", key.name());
-        let counter = self.counters
+        let counter = self
+            .counters
             .entry(name.clone())
             .or_insert_with(|| self.meter.u64_counter(name).build());
         counter.add(value, attributes);
@@ -103,7 +119,8 @@ impl OtlpMetricsExporter {
     /// Record a gauge metric in OTel format
     pub fn record_gauge(&self, key: &Key, value: f64, attributes: &[KeyValue]) {
         let name = format!("mountpoint.{}", key.name());
-        let gauge = self.gauges
+        let gauge = self
+            .gauges
             .entry(name.clone())
             .or_insert_with(|| self.meter.f64_gauge(name).build());
         gauge.record(value, attributes);
@@ -112,7 +129,8 @@ impl OtlpMetricsExporter {
     /// Record a histogram metric in OTel format
     pub fn record_histogram(&self, key: &Key, value: f64, attributes: &[KeyValue]) {
         let name = format!("mountpoint.{}", key.name());
-        let histogram = self.histograms
+        let histogram = self
+            .histograms
             .entry(name.clone())
             .or_insert_with(|| self.meter.f64_histogram(name).build());
         histogram.record(value, attributes);
