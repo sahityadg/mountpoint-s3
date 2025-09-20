@@ -7,7 +7,20 @@ use std::time::Duration;
 
 use crate::metrics::MetricValue;
 use dashmap::DashMap;
-use metrics::Key;
+use metrics::{Key, Unit};
+
+/// Convert metrics::Unit to OTLP unit string (UCUM format)
+pub fn convert_unit_to_otlp(unit: Option<Unit>) -> Option<&'static str> {
+    match unit {
+        Some(Unit::Count) => Some("1"),
+        Some(Unit::Bytes) => Some("By"),
+        Some(Unit::Microseconds) => Some("us"),
+        Some(Unit::Milliseconds) => Some("ms"),
+        Some(Unit::Seconds) => Some("s"),
+        None => None,
+        _ => None, // For any other units we don't handle yet
+    }
+}
 
 /// Get temporality preference from environment variable
 /// By default, we will use delta.
@@ -135,18 +148,38 @@ impl OtlpMetricsExporter {
     }
 
     /// Create a counter for the given name (used by register_counter)
-    pub fn create_counter_instrument(&self, name: String) -> opentelemetry::metrics::Counter<u64> {
-        self.meter.u64_counter(name).build()
+    pub fn create_counter_instrument(
+        &self,
+        name: String,
+        unit: Option<String>,
+    ) -> opentelemetry::metrics::Counter<u64> {
+        let mut builder = self.meter.u64_counter(name);
+        if let Some(unit_str) = unit {
+            builder = builder.with_unit(unit_str);
+        }
+        builder.build()
     }
 
     /// Create a gauge for the given name (used by register_gauge)  
-    pub fn create_gauge_instrument(&self, name: String) -> opentelemetry::metrics::Gauge<f64> {
-        self.meter.f64_gauge(name).build()
+    pub fn create_gauge_instrument(&self, name: String, unit: Option<String>) -> opentelemetry::metrics::Gauge<f64> {
+        let mut builder = self.meter.f64_gauge(name);
+        if let Some(unit_str) = unit {
+            builder = builder.with_unit(unit_str);
+        }
+        builder.build()
     }
 
     /// Create a histogram for the given name (used by register_histogram)
-    pub fn create_histogram_instrument(&self, name: String) -> opentelemetry::metrics::Histogram<f64> {
-        self.meter.f64_histogram(name).build()
+    pub fn create_histogram_instrument(
+        &self,
+        name: String,
+        unit: Option<String>,
+    ) -> opentelemetry::metrics::Histogram<f64> {
+        let mut builder = self.meter.f64_histogram(name);
+        if let Some(unit_str) = unit {
+            builder = builder.with_unit(unit_str);
+        }
+        builder.build()
     }
 
     /// Record a counter metric in OTel format

@@ -12,7 +12,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use dashmap::DashMap;
-use metrics::{Key, Metadata, Recorder};
+use metrics::{Key, Metadata, Recorder, Unit};
 use sysinfo::{MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, System, get_current_pid};
 
 use crate::sync::Arc;
@@ -102,8 +102,14 @@ fn poll_process_metrics(sys: &mut System) {
 }
 
 #[derive(Debug)]
+struct MetricEntry {
+    metric: Metric,
+    unit: Option<Unit>,
+}
+
+#[derive(Debug)]
 struct MetricsSink {
-    metrics: DashMap<Key, Metric>,
+    metrics: DashMap<Key, MetricEntry>,
     #[cfg(feature = "otlp_integration")]
     otlp_exporter: Option<OtlpMetricsExporter>,
 }
@@ -149,52 +155,79 @@ impl MetricsSink {
         }
     }
 
-    fn counter(&self, key: &Key) -> metrics::Counter {
-        let metric = self.metrics.entry(key.clone()).or_insert_with(|| {
+    fn counter(&self, key: &Key, unit: Option<metrics::Unit>) -> metrics::Counter {
+        let entry = self.metrics.entry(key.clone()).or_insert_with(|| {
             #[cfg(feature = "otlp_integration")]
             if let Some(exporter) = &self.otlp_exporter {
-                let otlp_counter = exporter.create_counter_instrument(key.name().to_string());
+                let unit_str = unit
+                    .and_then(|u| crate::metrics_otel::convert_unit_to_otlp(Some(u)))
+                    .map(String::from);
+                let otlp_counter = exporter.create_counter_instrument(key.name().to_string(), unit_str);
                 let attributes: Vec<opentelemetry::KeyValue> = key
                     .labels()
                     .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
                     .collect();
-                return Metric::Counter(Arc::new(data::ValueAndCount::with_otlp(otlp_counter, attributes)));
+                return MetricEntry {
+                    metric: Metric::Counter(Arc::new(data::ValueAndCount::with_otlp(otlp_counter, attributes))),
+                    unit,
+                };
             }
-            Metric::counter()
+            MetricEntry {
+                metric: Metric::counter(),
+                unit,
+            }
         });
-        metric.as_counter()
+        entry.metric.as_counter()
     }
 
-    fn gauge(&self, key: &Key) -> metrics::Gauge {
-        let metric = self.metrics.entry(key.clone()).or_insert_with(|| {
+    fn gauge(&self, key: &Key, unit: Option<metrics::Unit>) -> metrics::Gauge {
+        let entry = self.metrics.entry(key.clone()).or_insert_with(|| {
             #[cfg(feature = "otlp_integration")]
             if let Some(exporter) = &self.otlp_exporter {
-                let otlp_gauge = exporter.create_gauge_instrument(key.name().to_string());
+                let unit_str = unit
+                    .and_then(|u| crate::metrics_otel::convert_unit_to_otlp(Some(u)))
+                    .map(String::from);
+                let otlp_gauge = exporter.create_gauge_instrument(key.name().to_string(), unit_str);
                 let attributes: Vec<opentelemetry::KeyValue> = key
                     .labels()
                     .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
                     .collect();
-                return Metric::Gauge(Arc::new(data::AtomicGauge::with_otlp(otlp_gauge, attributes)));
+                return MetricEntry {
+                    metric: Metric::Gauge(Arc::new(data::AtomicGauge::with_otlp(otlp_gauge, attributes))),
+                    unit,
+                };
             }
-            Metric::gauge()
+            MetricEntry {
+                metric: Metric::gauge(),
+                unit,
+            }
         });
-        metric.as_gauge()
+        entry.metric.as_gauge()
     }
 
-    fn histogram(&self, key: &Key) -> metrics::Histogram {
-        let metric = self.metrics.entry(key.clone()).or_insert_with(|| {
+    fn histogram(&self, key: &Key, unit: Option<metrics::Unit>) -> metrics::Histogram {
+        let entry = self.metrics.entry(key.clone()).or_insert_with(|| {
             #[cfg(feature = "otlp_integration")]
             if let Some(exporter) = &self.otlp_exporter {
-                let otlp_histogram = exporter.create_histogram_instrument(key.name().to_string());
+                let unit_str = unit
+                    .and_then(|u| crate::metrics_otel::convert_unit_to_otlp(Some(u)))
+                    .map(String::from);
+                let otlp_histogram = exporter.create_histogram_instrument(key.name().to_string(), unit_str);
                 let attributes: Vec<opentelemetry::KeyValue> = key
                     .labels()
                     .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
                     .collect();
-                return Metric::Histogram(Arc::new(data::Histogram::with_otlp(otlp_histogram, attributes)));
+                return MetricEntry {
+                    metric: Metric::Histogram(Arc::new(data::Histogram::with_otlp(otlp_histogram, attributes))),
+                    unit,
+                };
             }
-            Metric::histogram()
+            MetricEntry {
+                metric: Metric::histogram(),
+                unit,
+            }
         });
-        metric.as_histogram()
+        entry.metric.as_histogram()
     }
 }
 
@@ -206,10 +239,10 @@ impl MetricsSink {
         let mut metrics = vec![];
 
         for mut entry in self.metrics.iter_mut() {
-            let (key, metric) = entry.pair_mut();
+            let (key, entry) = entry.pair_mut();
 
             // Get the string representation of the metric (this also resets the metric)
-            let Some(metric_str) = metric.fmt_and_reset() else {
+            let Some(metric_str) = entry.metric.fmt_and_reset() else {
                 continue;
             };
 
@@ -244,10 +277,10 @@ impl MetricsSink {
         let mut metrics = vec![];
 
         for mut entry in self.metrics.iter_mut() {
-            let (key, metric) = entry.pair_mut();
+            let (key, entry) = entry.pair_mut();
 
             // Get the string representation of the metric (this also resets the metric)
-            let Some(metric_str) = metric.fmt_and_reset() else {
+            let Some(metric_str) = entry.metric.fmt_and_reset() else {
                 continue;
             };
 
@@ -282,41 +315,51 @@ struct MetricsRecorder {
 impl Recorder for MetricsRecorder {
     fn describe_counter(
         &self,
-        _key: metrics::KeyName,
-        _unit: Option<metrics::Unit>,
+        key: metrics::KeyName,
+        unit: Option<metrics::Unit>,
         _description: metrics::SharedString,
     ) {
-        // No-op -- we don't implement descriptions
+        let key_obj = Key::from_name(key);
+        self.sink.metrics.entry(key_obj).or_insert_with(|| MetricEntry {
+            metric: Metric::counter(),
+            unit,
+        });
     }
 
-    fn describe_gauge(
-        &self,
-        _key: metrics::KeyName,
-        _unit: Option<metrics::Unit>,
-        _description: metrics::SharedString,
-    ) {
-        // No-op -- we don't implement descriptions
+    fn describe_gauge(&self, key: metrics::KeyName, unit: Option<metrics::Unit>, _description: metrics::SharedString) {
+        let key_obj = Key::from_name(key);
+        self.sink.metrics.entry(key_obj).or_insert_with(|| MetricEntry {
+            metric: Metric::gauge(),
+            unit,
+        });
     }
 
     fn describe_histogram(
         &self,
-        _key: metrics::KeyName,
-        _unit: Option<metrics::Unit>,
+        key: metrics::KeyName,
+        unit: Option<metrics::Unit>,
         _description: metrics::SharedString,
     ) {
-        // No-op -- we don't implement descriptions
+        let key_obj = Key::from_name(key);
+        self.sink.metrics.entry(key_obj).or_insert_with(|| MetricEntry {
+            metric: Metric::histogram(),
+            unit,
+        });
     }
 
     fn register_counter(&self, key: &Key, _metadata: &Metadata<'_>) -> metrics::Counter {
-        self.sink.counter(key)
+        let unit = self.sink.metrics.get(key).and_then(|entry| entry.unit);
+        self.sink.counter(key, unit)
     }
 
     fn register_gauge(&self, key: &Key, _metadata: &Metadata<'_>) -> metrics::Gauge {
-        self.sink.gauge(key)
+        let unit = self.sink.metrics.get(key).and_then(|entry| entry.unit);
+        self.sink.gauge(key, unit)
     }
 
     fn register_histogram(&self, key: &Key, _metadata: &Metadata<'_>) -> metrics::Histogram {
-        self.sink.histogram(key)
+        let unit = self.sink.metrics.get(key).and_then(|entry| entry.unit);
+        self.sink.histogram(key, unit)
     }
 }
 
@@ -368,9 +411,9 @@ mod tests {
                 metrics::histogram!(TEST_HISTOGRAM, "type" => "put").record(4.0);
 
                 for mut entry in sink.metrics.iter_mut() {
-                    let (key, metric) = entry.pair_mut();
+                    let (key, entry) = entry.pair_mut();
                     assert_eq!(key.labels().count(), 1, "{key} has no labels");
-                    match metric {
+                    match &entry.metric {
                         Metric::Counter(inner) => {
                             assert_eq!(key.name(), TEST_COUNTER);
                             let (sum, n) = inner.load_and_reset().expect("should have a value");
@@ -415,8 +458,8 @@ mod tests {
 
             // Check that each metric is zeroed (returns None) after the end of the loop reset it
             for mut entry in sink.metrics.iter_mut() {
-                let metric = entry.value_mut();
-                match metric {
+                let entry = entry.value_mut();
+                match &entry.metric {
                     Metric::Counter(inner) => assert!(inner.load_and_reset().is_none()),
                     Metric::Gauge(inner) => assert!(inner.load_if_changed().is_none()),
                     Metric::Histogram(inner) => assert!(inner.run_and_reset(|_| panic!("unreachable")).is_none()),
@@ -427,13 +470,39 @@ mod tests {
             metrics::gauge!(TEST_GAUGE, "type" => "processing").set(0.0);
             metrics::gauge!(TEST_GAUGE, "type" => "in_queue").set(0.0);
             for mut entry in sink.metrics.iter_mut() {
-                let metric = entry.value_mut();
-                let Metric::Gauge(inner) = metric else {
+                let entry = entry.value_mut();
+                let Metric::Gauge(inner) = &entry.metric else {
                     continue;
                 };
                 // We want to emit once to reflect that it's changed to 0, and then not emit again
                 assert!(inner.load_if_changed().is_some());
                 assert!(inner.load_if_changed().is_none());
+            }
+        });
+    }
+
+    #[test]
+    fn units_support() {
+        let sink = Arc::new(MetricsSink::new(None).unwrap());
+        let recorder = MetricsRecorder { sink: sink.clone() };
+
+        with_local_recorder(&recorder, || {
+            metrics::describe_counter!("bytes_counter", Unit::Bytes, "");
+            metrics::describe_gauge!("time_gauge", Unit::Milliseconds, "");
+            metrics::describe_histogram!("count_histogram", Unit::Count, "");
+
+            metrics::counter!("bytes_counter").increment(1024);
+            metrics::gauge!("time_gauge").set(500.0);
+            metrics::histogram!("count_histogram").record(5.0);
+
+            for entry in sink.metrics.iter() {
+                let (key, entry) = entry.pair();
+                match key.name() {
+                    "bytes_counter" => assert_eq!(entry.unit, Some(Unit::Bytes)),
+                    "time_gauge" => assert_eq!(entry.unit, Some(Unit::Milliseconds)),
+                    "count_histogram" => assert_eq!(entry.unit, Some(Unit::Count)),
+                    _ => panic!("Unexpected metric: {}", key.name()),
+                }
             }
         });
     }
