@@ -101,6 +101,35 @@ fn poll_process_metrics(sys: &mut System) {
     }
 }
 
+#[cfg(feature = "otlp_integration")]
+static OTLP_METRICS_FILTER: &[&str] = &[
+    "fuse.op_latency_us",
+    "fuse.io_size", 
+    "fuse.op_failures",
+    "fuse.mp_workers.total_count",
+    "fuse.mp_workers.idle_count",
+    "fuse.mp_workers.busy_count",
+    "s3.requests",
+    "s3.requests.failures", 
+    "s3.requests.total_latency_us",
+    "s3.requests.canceled",
+    "process.memory_usage",
+    "system.available_memory",
+];
+
+#[cfg(feature = "otlp_integration")]
+static OTLP_EXPERIMENTAL_METRICS_FILTER: &[&str] = &[
+    "s3.meta_requests",
+    "s3.meta_requests.failures",
+    "s3.meta_requests.total_latency_us", 
+    "s3.meta_requests.first_byte_latency_us",
+];
+
+#[cfg(feature = "otlp_integration")]
+fn should_export_to_otlp(metric_name: &str) -> bool {
+    OTLP_METRICS_FILTER.contains(&metric_name) || OTLP_EXPERIMENTAL_METRICS_FILTER.contains(&metric_name)
+}
+
 #[derive(Debug)]
 struct MetricEntry {
     metric: Metric,
@@ -159,18 +188,20 @@ impl MetricsSink {
         let entry = self.metrics.entry(key.clone()).or_insert_with(|| {
             #[cfg(feature = "otlp_integration")]
             if let Some(exporter) = &self.otlp_exporter {
-                let unit_str = unit
-                    .and_then(|u| crate::metrics_otel::convert_unit_to_otlp(Some(u)))
-                    .map(String::from);
-                let otlp_counter = exporter.create_counter_instrument(key.name().to_string(), unit_str);
-                let attributes: Vec<opentelemetry::KeyValue> = key
-                    .labels()
-                    .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
-                    .collect();
-                return MetricEntry {
-                    metric: Metric::Counter(Arc::new(data::ValueAndCount::with_otlp(otlp_counter, attributes))),
-                    unit,
-                };
+                if should_export_to_otlp(key.name()) {
+                    let unit_str = unit
+                        .and_then(|u| crate::metrics_otel::convert_unit_to_otlp(Some(u)))
+                        .map(String::from);
+                    let otlp_counter = exporter.create_counter_instrument(key.name().to_string(), unit_str);
+                    let attributes: Vec<opentelemetry::KeyValue> = key
+                        .labels()
+                        .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
+                        .collect();
+                    return MetricEntry {
+                        metric: Metric::Counter(Arc::new(data::ValueAndCount::with_otlp(otlp_counter, attributes))),
+                        unit,
+                    };
+                }
             }
             MetricEntry {
                 metric: Metric::counter(),
@@ -184,18 +215,20 @@ impl MetricsSink {
         let entry = self.metrics.entry(key.clone()).or_insert_with(|| {
             #[cfg(feature = "otlp_integration")]
             if let Some(exporter) = &self.otlp_exporter {
-                let unit_str = unit
-                    .and_then(|u| crate::metrics_otel::convert_unit_to_otlp(Some(u)))
-                    .map(String::from);
-                let otlp_gauge = exporter.create_gauge_instrument(key.name().to_string(), unit_str);
-                let attributes: Vec<opentelemetry::KeyValue> = key
-                    .labels()
-                    .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
-                    .collect();
-                return MetricEntry {
-                    metric: Metric::Gauge(Arc::new(data::AtomicGauge::with_otlp(otlp_gauge, attributes))),
-                    unit,
-                };
+                if should_export_to_otlp(key.name()) {
+                    let unit_str = unit
+                        .and_then(|u| crate::metrics_otel::convert_unit_to_otlp(Some(u)))
+                        .map(String::from);
+                    let otlp_gauge = exporter.create_gauge_instrument(key.name().to_string(), unit_str);
+                    let attributes: Vec<opentelemetry::KeyValue> = key
+                        .labels()
+                        .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
+                        .collect();
+                    return MetricEntry {
+                        metric: Metric::Gauge(Arc::new(data::AtomicGauge::with_otlp(otlp_gauge, attributes))),
+                        unit,
+                    };
+                }
             }
             MetricEntry {
                 metric: Metric::gauge(),
@@ -209,18 +242,20 @@ impl MetricsSink {
         let entry = self.metrics.entry(key.clone()).or_insert_with(|| {
             #[cfg(feature = "otlp_integration")]
             if let Some(exporter) = &self.otlp_exporter {
-                let unit_str = unit
-                    .and_then(|u| crate::metrics_otel::convert_unit_to_otlp(Some(u)))
-                    .map(String::from);
-                let otlp_histogram = exporter.create_histogram_instrument(key.name().to_string(), unit_str);
-                let attributes: Vec<opentelemetry::KeyValue> = key
-                    .labels()
-                    .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
-                    .collect();
-                return MetricEntry {
-                    metric: Metric::Histogram(Arc::new(data::Histogram::with_otlp(otlp_histogram, attributes))),
-                    unit,
-                };
+                if should_export_to_otlp(key.name()) {
+                    let unit_str = unit
+                        .and_then(|u| crate::metrics_otel::convert_unit_to_otlp(Some(u)))
+                        .map(String::from);
+                    let otlp_histogram = exporter.create_histogram_instrument(key.name().to_string(), unit_str);
+                    let attributes: Vec<opentelemetry::KeyValue> = key
+                        .labels()
+                        .map(|label| opentelemetry::KeyValue::new(label.key().to_string(), label.value().to_string()))
+                        .collect();
+                    return MetricEntry {
+                        metric: Metric::Histogram(Arc::new(data::Histogram::with_otlp(otlp_histogram, attributes))),
+                        unit,
+                    };
+                }
             }
             MetricEntry {
                 metric: Metric::histogram(),
@@ -505,6 +540,16 @@ mod tests {
                 }
             }
         });
+    }
+
+    #[test]
+    #[cfg(feature = "otlp_integration")]
+    fn otlp_allow_list() {
+        assert!(should_export_to_otlp("fuse.op_latency_us"));
+        assert!(should_export_to_otlp("s3.requests"));
+        assert!(should_export_to_otlp("s3.meta_requests"));
+        assert!(!should_export_to_otlp("some.random.metric"));
+        assert!(!should_export_to_otlp("not.allowed"));
     }
 
     /// This is a manual test for verifying the integration of the metrics system with OpenTelemetry.
